@@ -2,15 +2,14 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from queue_manager import QueueManager, Priority
-import json
+# import json
 import os
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
 
 allowed_origins = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
-if os.environ.get('RAILWAY_ENVIRONMENT'):
-    cors_origins = [allowed_origins, "https://*.railway.app", "https://*.up.railway.app"]
+if os.environ.get('RENDER_ENVIRONMENT'):
+    cors_origins = [allowed_origins, "https://*.render.com", "https://*.up.render.com"]
 else:
     # In development, use localhost
     cors_origins = "http://localhost:3000"
