@@ -29,7 +29,7 @@ cache = {
 
 def update_cache():
     """Update cache with latest data and increment version"""
-    global cache
+    cache
     cache['last_update'] = time.time()
     cache['queue_status'] = queue_manager.get_queue_status()
     cache['analytics'] = queue_manager.get_analytics()
