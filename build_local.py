@@ -14,7 +14,7 @@ from pathlib import Path
 
 def run_command(command, cwd=None, capture_output=True):
     """Run a command and return the result"""
-    print(f"📋 Running: {command}")
+    print(f"Running: {command}")
     try:
         if capture_output:
             result = subprocess.run(
@@ -26,12 +26,12 @@ def run_command(command, cwd=None, capture_output=True):
                 timeout=60
             )
             if result.returncode != 0:
-                print(f"❌ Command failed with exit code {result.returncode}")
+                print(f" Command failed with exit code {result.returncode}")
                 print(f"STDOUT: {result.stdout}")
                 print(f"STDERR: {result.stderr}")
                 return False
             else:
-                print(f"✅ Command succeeded")
+                print(f"Command succeeded")
                 if result.stdout:
                     print(f"Output: {result.stdout.strip()}")
                 return True
@@ -40,10 +40,10 @@ def run_command(command, cwd=None, capture_output=True):
             process = subprocess.Popen(command, shell=True, cwd=cwd)
             return process
     except subprocess.TimeoutExpired:
-        print(f"❌ Command timed out after 60 seconds")
+        print(f"Command timed out after 60 seconds")
         return False
     except Exception as e:
-        print(f"❌ Command failed with exception: {e}")
+        print(f"Command failed with exception: {e}")
         return False
 
 def check_dependencies():
@@ -52,19 +52,19 @@ def check_dependencies():
     
     # Check if we're in a virtual environment
     if not (os.environ.get('VIRTUAL_ENV') or sys.prefix != sys.base_prefix):
-        print("⚠️  Warning: Not running in a virtual environment")
+        print("Warning: Not running in a virtual environment")
         print("   Consider running: python -m venv venv && source venv/bin/activate")
     else:
-        print("✅ Running in virtual environment")
+        print("Running in virtual environment")
     
     # Check if required packages are installed
     try:
         import flask
         import pytest
-        print("✅ Required packages are installed")
+        print("Required packages are installed")
         return True
     except ImportError as e:
-        print(f"❌ Missing required package: {e}")
+        print(f"Missing required package: {e}")
         print("   Run: pip install -r requirements.txt")
         return False
 
@@ -86,12 +86,12 @@ def run_linting():
         lint_command = "python -m flake8 app.py queue_manager.py --max-line-length=120 --ignore=E501"
         return run_command(lint_command)
     except ImportError:
-        print("⚠️  flake8 not installed, skipping linting")
+        print(" flake8 not installed, skipping linting")
         return True
 
 def start_server():
     """Start the Flask server for integration testing"""
-    print("🚀 Starting Flask server for integration tests...")
+    print("Starting Flask server for integration tests...")
     
     # Set environment variables for testing
     env = os.environ.copy()
@@ -105,24 +105,24 @@ def start_server():
     ], env=env)
     
     # Wait for server to start
-    print("⏳ Waiting for server to start...")
+    print("Waiting for server to start...")
     for i in range(30):  # Wait up to 30 seconds
         try:
             response = requests.get('http://localhost:5002/api/health', timeout=2)
             if response.status_code == 200:
-                print("✅ Server started successfully")
+                print("Server started successfully")
                 return server_process
         except requests.exceptions.RequestException:
             pass
         time.sleep(1)
     
-    print("❌ Server failed to start")
+    print("Server failed to start")
     server_process.terminate()
     return None
 
 def run_integration_tests(server_process):
     """Run integration tests against the running server"""
-    print("🔗 Running integration tests...")
+    print("Running integration tests...")
     
     try:
         # Move the integration test file to root temporarily if it's not there
@@ -134,16 +134,16 @@ def run_integration_tests(server_process):
             test_command = f"python {integration_test_path}"
             return run_command(test_command)
         else:
-            print("⚠️  Integration test file not found, skipping...")
+            print(" Integration test file not found, skipping...")
             return True
             
     except Exception as e:
-        print(f"❌ Integration tests failed: {e}")
+        print(f"Integration tests failed: {e}")
         return False
 
 def main():
     """Main build function"""
-    print("🏗️  Starting local build process for Coffee Shop Queue System Backend")
+    print("Starting local build process for Coffee Shop Queue System Backend")
     print("=" * 70)
     
     # Change to backend directory
@@ -165,7 +165,7 @@ def main():
             
         # Step 3: Run linting
         if success and not run_linting():
-            print("⚠️  Linting failed, but continuing...")
+            print("Linting failed, but continuing...")
             
         # Step 4: Start server for integration tests
         if success:
@@ -176,12 +176,12 @@ def main():
         # Step 5: Run integration tests
         if success and server_process:
             if not run_integration_tests(server_process):
-                print("⚠️  Integration tests failed, but unit tests passed")
+                print(" Integration tests failed, but unit tests passed")
         
     finally:
         # Clean up: stop the server
         if server_process:
-            print("🛑 Stopping test server...")
+            print("Stopping test server...")
             server_process.terminate()
             try:
                 server_process.wait(timeout=5)
@@ -190,12 +190,12 @@ def main():
     
     print("=" * 70)
     if success:
-        print("🎉 Build completed successfully!")
-        print("✅ Your code is ready to push to production")
+        print("Build completed successfully!")
+        print("Your code is ready to push to production")
         return 0
     else:
-        print("❌ Build failed!")
-        print("🚨 Please fix the issues above before pushing")
+        print("Build failed!")
+        print("Please fix the issues above before pushing")
         return 1
 
 if __name__ == "__main__":

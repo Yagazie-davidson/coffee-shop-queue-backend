@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from queue_manager import QueueManager, Priority
+from datetime import datetime
 # import json
 import os
 
@@ -15,10 +16,31 @@ else:
     cors_origins = "http://localhost:3000"
 
 CORS(app, resources={r"/*": {"origins": cors_origins}})
-socketio = SocketIO(app, cors_allowed_origins=cors_origins)
+
+# Configure SocketIO for high latency networks
+socketio = SocketIO(
+    app, 
+    cors_allowed_origins=cors_origins,
+    # Increase timeouts for high latency networks
+    ping_timeout=60,  # How long to wait for pong response (default: 20)
+    ping_interval=25,  # How often to send ping (default: 25)
+    # Enable reconnection handling
+    always_connect=True,
+    # Increase max HTTP request size for large payloads
+    max_http_buffer_size=1000000,  # 1MB
+    # Enable compression
+    compression_threshold=1024,
+    # Add connection retry settings
+    logger=True,
+    engineio_logger=True
+)
 
 # Global queue manager instance
 queue_manager = QueueManager()
+
+# Connection tracking for monitoring
+connected_clients = {}
+client_rooms = {}  # Track which rooms each client is in
 
 # API Routes
 @app.route('/api/orders', methods=['POST'])
@@ -42,8 +64,8 @@ def create_order():
         order = queue_manager.add_order(customer_name, items, priority)
         
         # Broadcast queue update to all connected clients
-        socketio.emit('queue_updated', queue_manager.get_queue_status(), room='queue_room')
-        socketio.emit('analytics_updated', queue_manager.get_analytics(), room='staff_room')
+        safe_emit('queue_updated', queue_manager.get_queue_status(), room='queue_room')
+        safe_emit('analytics_updated', queue_manager.get_analytics(), room='staff_room')
         
         return jsonify({
             'success': True,
@@ -64,8 +86,8 @@ def get_next_order():
             return jsonify({'message': 'No orders in queue'}), 204
         
         # Broadcast updates
-        socketio.emit('queue_updated', queue_manager.get_queue_status(), room='queue_room')
-        socketio.emit('order_started', order.to_dict(), room='staff_room')
+        safe_emit('queue_updated', queue_manager.get_queue_status(), room='queue_room')
+        safe_emit('order_started', order.to_dict(), room='staff_room')
         
         return jsonify({
             'success': True,
@@ -85,9 +107,9 @@ def complete_order(order_id):
             return jsonify({'error': 'Order not found or not in preparation'}), 404
         
         # Broadcast updates
-        socketio.emit('queue_updated', queue_manager.get_queue_status(), room='queue_room')
-        socketio.emit('order_completed', {'order_id': order_id}, room='staff_room')
-        socketio.emit('analytics_updated', queue_manager.get_analytics(), room='staff_room')
+        safe_emit('queue_updated', queue_manager.get_queue_status(), room='queue_room')
+        safe_emit('order_completed', {'order_id': order_id}, room='staff_room')
+        safe_emit('analytics_updated', queue_manager.get_analytics(), room='staff_room')
         
         return jsonify({'success': True, 'message': 'Order completed'})
         
@@ -103,8 +125,8 @@ def cancel_order(order_id):
         if not success:
             return jsonify({'error': 'Order not found'}), 404
         
-        socketio.emit('queue_updated', queue_manager.get_queue_status(), room='queue_room')
-        socketio.emit('order_cancelled', {'order_id': order_id}, room='staff_room')
+        safe_emit('queue_updated', queue_manager.get_queue_status(), room='queue_room')
+        safe_emit('order_cancelled', {'order_id': order_id}, room='staff_room')
         
         return jsonify({'success': True, 'message': 'Order cancelled'})
         
@@ -117,6 +139,22 @@ def get_queue_status():
     try:
         status = queue_manager.get_queue_status()
         return jsonify(status)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/queue/poll', methods=['GET'])
+def poll_queue_updates():
+    """Polling endpoint for clients when SocketIO is unavailable"""
+    try:
+        # Get current timestamp for client to track changes
+        timestamp = datetime.now().isoformat()
+        
+        return jsonify({
+            'queue_status': queue_manager.get_queue_status(),
+            'analytics': queue_manager.get_analytics(),
+            'timestamp': timestamp,
+            'polling_mode': True
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -162,40 +200,124 @@ def get_menu():
 # SocketIO Events
 @socketio.on('connect')
 def handle_connect():
-    print(f'Client connected: {request.sid}')
-    emit('connected', {'message': 'Connected to coffee shop queue system'})
+    client_id = request.sid
+    connected_clients[client_id] = {
+        'connected_at': datetime.now(),
+        'last_ping': datetime.now(),
+        'rooms': set()
+    }
+    client_rooms[client_id] = set()
+    print(f'Client connected: {client_id} (Total clients: {len(connected_clients)})')
+    emit('connected', {
+        'message': 'Connected to coffee shop queue system',
+        'client_id': client_id,
+        'server_time': datetime.now().isoformat()
+    })
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    print(f'Client disconnected: {request.sid}')
+    client_id = request.sid
+    if client_id in connected_clients:
+        del connected_clients[client_id]
+    if client_id in client_rooms:
+        del client_rooms[client_id]
+    print(f'Client disconnected: {client_id} (Total clients: {len(connected_clients)})')
+
+@socketio.on('ping')
+def handle_ping():
+    """Handle client ping for connection health check"""
+    client_id = request.sid
+    if client_id in connected_clients:
+        connected_clients[client_id]['last_ping'] = datetime.now()
+    emit('pong', {'timestamp': datetime.now().isoformat()})
+
+@socketio.on('reconnect')
+def handle_reconnect():
+    """Handle client reconnection"""
+    client_id = request.sid
+    print(f'Client reconnected: {client_id}')
+    emit('reconnected', {
+        'message': 'Successfully reconnected to coffee shop queue system',
+        'client_id': client_id,
+        'server_time': datetime.now().isoformat()
+    })
 
 @socketio.on('join_queue_room')
 def handle_join_queue_room():
     """Join room for queue updates"""
+    client_id = request.sid
     join_room('queue_room')
+    if client_id in client_rooms:
+        client_rooms[client_id].add('queue_room')
+    print(f'Client {client_id} joined queue_room')
     emit('queue_updated', queue_manager.get_queue_status())
 
 @socketio.on('join_staff_room')
 def handle_join_staff_room():
     """Join room for staff updates"""
+    client_id = request.sid
     join_room('staff_room')
+    if client_id in client_rooms:
+        client_rooms[client_id].add('staff_room')
+    print(f'Client {client_id} joined staff_room')
     emit('queue_updated', queue_manager.get_queue_status())
     emit('analytics_updated', queue_manager.get_analytics())
 
 @socketio.on('leave_queue_room')
 def handle_leave_queue_room():
     """Leave queue room"""
+    client_id = request.sid
     leave_room('queue_room')
+    if client_id in client_rooms:
+        client_rooms[client_id].discard('queue_room')
+    print(f'Client {client_id} left queue_room')
 
 @socketio.on('leave_staff_room')
 def handle_leave_staff_room():
     """Leave staff room"""
+    client_id = request.sid
     leave_room('staff_room')
+    if client_id in client_rooms:
+        client_rooms[client_id].discard('staff_room')
+    print(f'Client {client_id} left staff_room')
 
 # Health check endpoint
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({'status': 'healthy', 'service': 'coffee-shop-queue-system'})
+
+# Connection monitoring endpoint
+@app.route('/api/connections', methods=['GET'])
+def get_connections():
+    """Get current connection status"""
+    return jsonify({
+        'total_connections': len(connected_clients),
+        'queue_room_clients': len([cid for cid, rooms in client_rooms.items() if 'queue_room' in rooms]),
+        'staff_room_clients': len([cid for cid, rooms in client_rooms.items() if 'staff_room' in rooms]),
+        'connections': [
+            {
+                'client_id': cid,
+                'connected_at': client_data['connected_at'].isoformat(),
+                'last_ping': client_data['last_ping'].isoformat(),
+                'rooms': list(client_rooms.get(cid, set()))
+            }
+            for cid, client_data in connected_clients.items()
+        ]
+    })
+
+def safe_emit(event, data, room=None, client_id=None):
+    """Safely emit events with error handling"""
+    try:
+        if room:
+            socketio.emit(event, data, room=room)
+        elif client_id:
+            socketio.emit(event, data, to=client_id)
+        else:
+            socketio.emit(event, data)
+        return True
+    except Exception as e:
+        print(f"Error emitting {event} to {room or client_id or 'all'}: {e}")
+        return False
 
 if __name__ == '__main__':
     print("Starting Coffee Shop Queue Management System...")
