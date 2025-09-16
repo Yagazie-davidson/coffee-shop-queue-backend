@@ -9,7 +9,7 @@ app = Flask(__name__)
 
 allowed_origins = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
 if os.environ.get('RENDER_ENVIRONMENT'):
-    cors_origins = [allowed_origins, "https://*.render.com", "https://*.up.render.com"]
+    cors_origins = [allowed_origins, "https://*.render.com", "https://*.up.render.com", "https://*.vercel.app"]
 else:
     # In development, use localhost
     cors_origins = "http://localhost:3000"
